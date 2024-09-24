@@ -1,71 +1,102 @@
-import { useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
+'use client'
+
+import React, { FC, useState } from 'react';
+import { createClient } from '@supabase/supabase-js';
+import { toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 interface AddHabitModalProps {
+  isOpen: boolean;
   onClose: () => void;
+  onHabitAdded: () => void;
 }
 
-export function AddHabitModal({ onClose }: AddHabitModalProps) {
-  const [habitName, setHabitName] = useState('');
-  const [habitFrequency, setHabitFrequency] = useState('daily');
+export const AddHabitModal: FC<AddHabitModalProps> = ({ isOpen, onClose, onHabitAdded }) => {
+  const [name, setName] = useState('');
+  const [timezone, setTimezone] = useState('');
   const [reminderTime, setReminderTime] = useState('');
-  const [habitDescription, setHabitDescription] = useState('');
+  const [pushNotifications, setPushNotifications] = useState(false);
+  const [emailReminders, setEmailReminders] = useState(false);
 
-  function handleSubmit() {
-    // Handle form submission logic here
-    console.log({
-      habitName,
-      habitFrequency,
-      reminderTime,
-      habitDescription,
-    });
-    onClose();
+  async function handleAddHabit() {
+    const { data, error } = await supabase
+      .from('habits')
+      .insert([
+        {
+          name,
+          timezone,
+          reminder_time: reminderTime,
+          push_notifications: pushNotifications,
+          email_reminders: emailReminders,
+        },
+      ]);
+
+    if (error) {
+      toast.error('Failed to add habit');
+    } else {
+      toast.success('Habit added successfully');
+      onHabitAdded();
+      onClose();
+    }
   }
 
+  if (!isOpen) return null;
+
   return (
-    <Dialog  onClose={onClose}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Add New Habit</DialogTitle>
-          <DialogClose onClick={onClose} />
-        </DialogHeader>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+      <div className="bg-white rounded-lg p-6 w-full max-w-md">
+        <h2 className="text-xl font-semibold mb-4">Add New Habit</h2>
         <div className="space-y-4">
-          <Input
+          <input
+            type="text"
             placeholder="Habit Name"
-            value={habitName}
-            onChange={(e) => setHabitName(e.target.value)}
-            required
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full px-4 py-2 border rounded"
           />
-          <Select value={habitFrequency} onValueChange={setHabitFrequency}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select frequency" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="daily">Daily</SelectItem>
-              <SelectItem value="weekly">Weekly</SelectItem>
-              <SelectItem value="specific-days">Specific Days</SelectItem>
-            </SelectContent>
-          </Select>
-          <Input
+          <input
+            type="text"
+            placeholder="Timezone"
+            value={timezone}
+            onChange={(e) => setTimezone(e.target.value)}
+            className="w-full px-4 py-2 border rounded"
+          />
+          <input
             type="time"
             placeholder="Reminder Time"
             value={reminderTime}
             onChange={(e) => setReminderTime(e.target.value)}
+            className="w-full px-4 py-2 border rounded"
           />
-          <Textarea
-            placeholder="Habit Description"
-            value={habitDescription}
-            onChange={(e) => setHabitDescription(e.target.value)}
-          />
-          <Button onClick={handleSubmit} className="w-full">
-            Add Habit
-          </Button>
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              checked={pushNotifications}
+              onChange={(e) => setPushNotifications(e.target.checked)}
+              className="mr-2"
+            />
+            <label>Push Notifications</label>
+          </div>
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              checked={emailReminders}
+              onChange={(e) => setEmailReminders(e.target.checked)}
+              className="mr-2"
+            />
+            <label>Email Reminders</label>
+          </div>
         </div>
-      </DialogContent>
-    </Dialog>
+        <div className="mt-4 flex justify-end">
+          <button onClick={onClose} className="bg-red-500 text-white px-4 py-2 rounded">Close</button>
+          <button onClick={handleAddHabit} className="bg-blue-500 text-white px-4 py-2 rounded ml-2">Add Habit</button>
+        </div>
+      </div>
+    </div>
   );
-}
+};

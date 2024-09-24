@@ -1,16 +1,18 @@
 'use client'
 
-import { useState } from 'react';
-import { Suspense } from 'react';
-import { RecentActivity } from '@/components/recent-activity';
-import { HabitList } from '@/components/habit-list';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { HabitTracker } from '@/components/habit-grid';
+import { useState } from 'react'; // Import useState
 import { Header } from '@/components/header';
-import { AddHabitModal } from '@/components/add-habit-modal';
+import { HabitTracker } from '../../components/habit-grid';
+import { fetchHabits } from '../../lib/db';
+import { Habit } from '../../types/habit';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Suspense } from 'react';
+import { HabitList } from '@/components/habit-list';
+import { RecentActivity } from '@/components/recent-activity';
 import { Button } from '@/components/ui/button';
+import { AddHabitModal } from '@/components/add-habit-modal';
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   function handleAddHabitClick() {
@@ -20,15 +22,15 @@ export default function DashboardPage() {
   function handleCloseModal() {
     setIsModalOpen(false);
   }
-
+  const habits: Habit[] = await fetchHabits();
   return (
     <>
       <Header />
-      <div className='bg-gradient-to-b from-[#FFA07A] to-[#FFE4B5]'>
+      <div className='min-h-screen bg-gradient-to-b from-[#FFA07A] to-[#FFE4B5]'>
         <div className="max-w-6xl mx-auto px-4 py-8 ">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
             <div className="md:col-span-2">
-              <HabitTracker />
+            <HabitTracker initialHabits={habits} />
             </div>
             <div className="space-y-6">
               <Card>
@@ -58,7 +60,7 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
-      {isModalOpen && <AddHabitModal onClose={handleCloseModal} />}
+      {isModalOpen && <AddHabitModal isOpen={isModalOpen} onClose={handleCloseModal} onHabitAdded={() => {}} />}
     </>
   );
 }

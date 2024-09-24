@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { supabase } from '../supabaseClient'
 import { motion } from 'framer-motion'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,6 +12,9 @@ import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import { Bell, Mail, Upload, ArrowRight, ArrowLeft } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
+import { toast, ToastContainer } from 'react-toastify'
+import 'react-toastify/dist/ReactToastify.css'
+import HabitGrid from './habit-grid'
 
 interface Habit {
   name: string
@@ -54,7 +57,6 @@ const FloatingBubbles = () => (
 
 export default function ProfileSetup() {
   const router = useRouter()
-  const supabase = createClientComponentClient()
   const [name, setName] = useState('')
   const [timezone, setTimezone] = useState('')
   const [selectedHabits, setSelectedHabits] = useState<string[]>([])
@@ -63,6 +65,18 @@ export default function ProfileSetup() {
   const [pushNotifications, setPushNotifications] = useState(false)
   const [emailReminders, setEmailReminders] = useState(false)
   const [progress, setProgress] = useState(25)
+  const [profilePicture, setProfilePicture] = useState<File | null>(null)
+  const [profilePictureUrl, setProfilePictureUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data: { session }, error } = await supabase.auth.getSession()
+      if (error || !session) {
+        router.push('/login')
+      }
+    }
+    checkAuth()
+  }, [router])
 
   useEffect(() => {
     const completedSteps = [name, timezone, selectedHabits.length > 0, reminderTime].filter(Boolean).length
@@ -79,6 +93,19 @@ export default function ProfileSetup() {
     if (customHabit && !selectedHabits.includes(customHabit)) {
       setSelectedHabits(prev => [...prev, customHabit])
       setCustomHabit('')
+    }
+  }
+
+  const handleProfilePictureChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0]
+      setProfilePicture(file)
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        setProfilePictureUrl(reader.result as string)
+        toast.success('Profile picture uploaded successfully!')
+      }
+      reader.readAsDataURL(file)
     }
   }
 
@@ -107,9 +134,11 @@ export default function ProfileSetup() {
 
       // Save user habits
       const habitData = selectedHabits.map(habit => ({
-        user_id: user.id,
-        habit_name: habit,
-        is_custom: !predefinedHabits.some(h => h.name === habit),
+        name: habit,
+        timezone,
+        reminder_time: reminderTime,
+        push_notifications: pushNotifications,
+        email_reminders: emailReminders,
       }))
 
       const { data: habitDataResponse, error: habitError } = await supabase
@@ -131,16 +160,17 @@ export default function ProfileSetup() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#FFA07A] to-[#FFE4B5] text-gray-800 py-12 px-4">
       <FloatingBubbles />
+      <ToastContainer />
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
         className="max-w-2xl mx-auto bg-white rounded-lg shadow-lg p-8"
       >
-        <h1 className="text-3xl font-light text-gray-600 text-center mb-2">
+        <h1 className="text-3xl font-light text-black text-center mb-2">
           Let&apos;s get started on your journey with HabitStride!
         </h1>
-        <p className="text-center text-gray-500 italic mb-8">
+        <p className="text-center text-gray-700 italic mb-8">
           Tell us about yourself and the habits you want to build.
         </p>
 
@@ -173,10 +203,20 @@ export default function ProfileSetup() {
 
           <div>
             <Label>Profile Picture (Optional)</Label>
-            <div className="mt-1 flex items-center justify-center w-32 h-32 border-2 border-dashed border-gray-300 rounded-full hover:border-green-200 transition-colors">
-              <Button variant="ghost" className="w-full h-full rounded-full">
-                <Upload className="w-6 h-6 text-gray-400" />
-              </Button>
+            <div className="mt-1 flex items-center justify-center w-32 h-32 border-2 border-dashed border-gray-300 rounded-full hover:border-green-200 transition-colors relative">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleProfilePictureChange}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+              {profilePictureUrl ? (
+                <img src={profilePictureUrl} alt="Profile" className="w-full h-full rounded-full object-cover" />
+              ) : (
+                <Button variant="ghost" className="w-full h-full rounded-full">
+                  <Upload className="w-6 h-6 text-gray-400" />
+                </Button>
+              )}
             </div>
           </div>
 
@@ -193,6 +233,18 @@ export default function ProfileSetup() {
                   <Label htmlFor={habit.name} className="flex items-center space-x-2">
                     <span className="text-2xl">{habit.icon}</span>
                     <span>{habit.name}</span>
+                  </Label>
+                </div>
+              ))}
+              {selectedHabits.filter(habit => !predefinedHabits.some(h => h.name === habit)).map((habit) => (
+                <div key={habit} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={habit}
+                    checked={selectedHabits.includes(habit)}
+                    onCheckedChange={() => handleHabitToggle(habit)}
+                  />
+                  <Label htmlFor={habit} className="flex items-center space-x-2">
+                    <span>{habit}</span>
                   </Label>
                 </div>
               ))}
@@ -222,6 +274,7 @@ export default function ProfileSetup() {
                   id="push-notifications"
                   checked={pushNotifications}
                   onCheckedChange={setPushNotifications}
+                  className="bg-gray-200"
                 />
                 <Label htmlFor="push-notifications" className="flex items-center space-x-2">
                   <Bell className="w-4 h-4 text-green-500" />
@@ -233,6 +286,7 @@ export default function ProfileSetup() {
                   id="email-reminders"
                   checked={emailReminders}
                   onCheckedChange={setEmailReminders}
+                  className="bg-gray-200"
                 />
                 <Label htmlFor="email-reminders" className="flex items-center space-x-2">
                   <Mail className="w-4 h-4 text-blue-500" />
@@ -255,12 +309,13 @@ export default function ProfileSetup() {
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back
           </Button>
-          <Button className="bg-coral-500 hover:bg-coral-600 text-white px-6 py-2" onClick={handleSubmit}>
+          <Button className="bg-coral-500 hover:bg-coral-600 text-black px-6 py-2" onClick={handleSubmit}>
             Next
             <ArrowRight className="w-4 h-4 ml-2" />
           </Button>
         </div>
       </motion.div>
+      <HabitGrid />
     </div>
   )
 }
