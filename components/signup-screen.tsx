@@ -11,6 +11,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { supabase } from "../lib/supabaseClient";
 import { useRouter } from "next/navigation";
+import { toast } from 'react-toastify';
 
 export default function SignupScreen() {
   const [showPassword, setShowPassword] = useState(false);
@@ -24,21 +25,33 @@ export default function SignupScreen() {
     e.preventDefault();
     setError(null);
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: name,
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: name,
+          },
         },
-      },
-    });
+      });
 
-    if (error) {
+      if (error) throw error;
+
+      if (data.user) {
+        // Create a profile for the new user
+        const { error: profileError } = await supabase
+          .from('profile')
+          .insert({ id: data.user.id, full_name: name, onboarded: false });
+
+        if (profileError) throw profileError;
+
+        // Redirect to onboarding page
+        router.push("/onboarding");
+      }
+    } catch (error) {
       setError(error.message);
-    } else if (data.user) {
-      // Redirect to onboarding or profile page
-      router.push("/onboarding");
+      toast.error('Failed to sign up. Please try again.');
     }
   };
 

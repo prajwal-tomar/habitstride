@@ -1,20 +1,20 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../supabaseClient'
 import { motion } from 'framer-motion'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { Progress } from "@/components/ui/progress"
-import { Bell, Mail, Upload, ArrowRight, ArrowLeft } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { toast, ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
-import HabitGrid from './habit-grid'
+import { useForm, Controller } from 'react-hook-form'
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Textarea } from "@/components/ui/textarea"
+import { useDropzone } from 'react-dropzone'
 
 interface Habit {
   name: string
@@ -29,87 +29,69 @@ const predefinedHabits: Habit[] = [
   { name: 'Sleep Early', icon: '🛌' },
 ]
 
-const FloatingBubbles = () => (
-  <div className="absolute top-0 left-0 w-full h-40 overflow-hidden pointer-events-none">
-    {[...Array(10)].map((_, i) => (
-      <motion.div
-        key={i}
-        className="absolute bg-white rounded-full opacity-20"
-        style={{
-          width: Math.random() * 20 + 10,
-          height: Math.random() * 20 + 10,
-          left: `${Math.random() * 100}%`,
-        }}
-        initial={{ y: 100, opacity: 0 }}
-        animate={{
-          y: -100,
-          opacity: [0, 1, 0],
-          transition: {
-            duration: Math.random() * 3 + 2,
-            repeat: Infinity,
-            delay: Math.random() * 2,
-          },
-        }}
-      />
-    ))}
-  </div>
-)
+interface ProfileFormData {
+  username: string
+  avatar_url: string
+  bio: string
+  habits: string[]
+  reminder_time: string
+  theme: string
+}
 
 export default function ProfileSetup() {
   const router = useRouter()
-  const [name, setName] = useState('')
-  const [timezone, setTimezone] = useState('')
-  const [selectedHabits, setSelectedHabits] = useState<string[]>([])
-  const [customHabit, setCustomHabit] = useState('')
-  const [reminderTime, setReminderTime] = useState('')
-  const [pushNotifications, setPushNotifications] = useState(false)
-  const [emailReminders, setEmailReminders] = useState(false)
-  const [progress, setProgress] = useState(25)
-  const [profilePicture, setProfilePicture] = useState<File | null>(null)
-  const [profilePictureUrl, setProfilePictureUrl] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    const checkAuth = async () => {
-      const { data: { session }, error } = await supabase.auth.getSession()
-      if (error || !session) {
+    const checkOnboardingStatus = async () => {
+      const { data: { session }, error: authError } = await supabase.auth.getSession()
+      if (authError || !session) {
         router.push('/login')
+        return
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from('profile')
+        .select('onboarded')
+        .eq('id', session.user.id)
+        .single()
+
+      if (profileError) {
+        console.error('Error fetching profile:', profileError)
+        return
+      }
+
+      if (profile && profile.onboarded) {
+        router.push('/dashboard')
+      } else {
+        setIsLoading(false)
       }
     }
-    checkAuth()
+
+    checkOnboardingStatus()
   }, [router])
 
+  const { control, handleSubmit, setValue, watch } = useForm<ProfileFormData>({
+    defaultValues: {
+      username: '',
+      avatar_url: '',
+      bio: '',
+      habits: [],
+      reminder_time: '09:00',
+      theme: 'light',
+    }
+  })
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+
+  const watchAvatarUrl = watch('avatar_url')
+
   useEffect(() => {
-    const completedSteps = [name, timezone, selectedHabits.length > 0, reminderTime].filter(Boolean).length
-    setProgress(completedSteps * 25)
-  }, [name, timezone, selectedHabits, reminderTime])
+    // Update local avatarUrl state when form avatar_url changes
+    setAvatarUrl(watchAvatarUrl)
+  }, [watchAvatarUrl])
 
-  const handleHabitToggle = (habit: string) => {
-    setSelectedHabits(prev =>
-      prev.includes(habit) ? prev.filter(h => h !== habit) : [...prev, habit]
-    )
-  }
-
-  const handleAddCustomHabit = () => {
-    if (customHabit && !selectedHabits.includes(customHabit)) {
-      setSelectedHabits(prev => [...prev, customHabit])
-      setCustomHabit('')
-    }
-  }
-
-  const handleProfilePictureChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0]
-      setProfilePicture(file)
-      const reader = new FileReader()
-      reader.onloadend = () => {
-        setProfilePictureUrl(reader.result as string)
-        toast.success('Profile picture uploaded successfully!')
-      }
-      reader.readAsDataURL(file)
-    }
-  }
-
-  const handleSubmit = async () => {
+  const onSubmit = async (data: ProfileFormData) => {
+    setIsLoading(true)
     try {
       const { data: { user }, error: authError } = await supabase.auth.getUser()
       
@@ -117,49 +99,98 @@ export default function ProfileSetup() {
       if (!user) throw new Error('User not authenticated')
 
       // Save user profile
-      const { data: userData, error: userError } = await supabase
-        .from('profiles')
+      const { error: profileError } = await supabase
+        .from('profile')
         .upsert({
           id: user.id,
-          name,
-          timezone,
-          reminder_time: reminderTime,
-          push_notifications: pushNotifications,
-          email_reminders: emailReminders,
+          username: data.username,
+          avatar_url: data.avatar_url,
+          bio: data.bio,
+          onboarded: true // Set onboarded to true
         })
-        .select()
 
-      console.log('User Data:', userData)
-      if (userError) throw userError
+      if (profileError) throw profileError
 
       // Save user habits
-      const habitData = selectedHabits.map(habit => ({
-        name: habit,
-        timezone,
-        reminder_time: reminderTime,
-        push_notifications: pushNotifications,
-        email_reminders: emailReminders,
-      }))
+      const habitPromises = data.habits.map(habit => 
+        supabase.from('habits').insert({
+          user_id: user.id,
+          habit_name: habit,
+          goal: '', // You might want to add a goal field to your form if needed
+        })
+      )
 
-      const { data: habitDataResponse, error: habitError } = await supabase
-        .from('habits')
-        .upsert(habitData)
-        .select()
+      await Promise.all(habitPromises)
 
-      console.log('Habit Data:', habitDataResponse)
-      if (habitError) throw habitError
+      // Save user preferences
+      const { error: preferencesError } = await supabase
+        .from('preferences')
+        .upsert({
+          id: user.id,
+          reminder_time: data.reminder_time,
+          theme: data.theme,
+        })
+
+      if (preferencesError) throw preferencesError
 
       // Navigate to the dashboard
       router.push('/dashboard')
     } catch (error) {
       console.error('Error saving profile:', error)
-      // TODO: Show error message to user
+      toast.error('Failed to save profile. Please try again.')
+    } finally {
+      setIsLoading(false)
     }
+  }
+
+  const handleAvatarUpload = async (file: File) => {
+    try {
+      const fileExt = file.name.split('.').pop()
+      const fileName = `${Math.random()}.${fileExt}`
+      const filePath = `${fileName}`
+
+      let { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file)
+
+      if (uploadError) {
+        throw uploadError
+      }
+
+      const { data } = supabase.storage.from('avatars').getPublicUrl(filePath)
+      
+      if (data) {
+        setValue('avatar_url', data.publicUrl)
+        setAvatarUrl(data.publicUrl) // Update local state
+        toast.success('Avatar uploaded successfully!')
+      } else {
+        throw new Error('Failed to get public URL')
+      }
+    } catch (error) {
+      toast.error('Error uploading avatar!')
+      console.error(error)
+    }
+  }
+
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    if (acceptedFiles && acceptedFiles.length > 0) {
+      handleAvatarUpload(acceptedFiles[0])
+    }
+  }, [])
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: { 'image/*': [] },
+    multiple: false
+  })
+
+  if (isLoading) {
+    return <div>Loading...</div>
   }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#FFA07A] to-[#FFE4B5] text-gray-800 py-12 px-4">
-      <FloatingBubbles />
+      {/* <FloatingBubbles /> */}
       <ToastContainer />
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -168,56 +199,94 @@ export default function ProfileSetup() {
         className="max-w-2xl mx-auto bg-white rounded-lg shadow-lg p-8"
       >
         <h1 className="text-3xl font-light text-black text-center mb-2">
-          Let&apos;s get started on your journey with HabitStride!
+          Let&apos;s set up your HabitStride profile!
         </h1>
         <p className="text-center text-gray-700 italic mb-8">
-          Tell us about yourself and the habits you want to build.
+          Tell us about yourself, the habits you want to build, and your preferences.
         </p>
 
-        <div className="space-y-6">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
           <div>
-            <Label htmlFor="name">Your Name</Label>
-            <Input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Enter your name"
-              className="mt-1 border-green-200"
+            <Label htmlFor="username">Username</Label>
+            <Controller
+              name="username"
+              control={control}
+              rules={{ required: 'Username is required' }}
+              render={({ field }) => (
+                <Input
+                  {...field}
+                  id="username"
+                  placeholder="Enter your username"
+                  className="mt-1 border-green-200"
+                />
+              )}
             />
           </div>
 
           <div>
-            <Label htmlFor="timezone">Timezone</Label>
-            <Select onValueChange={setTimezone}>
-              <SelectTrigger id="timezone" className="mt-1">
-                <SelectValue placeholder="Select your timezone" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="pst">Pacific Standard Time (PST)</SelectItem>
-                <SelectItem value="est">Eastern Standard Time (EST)</SelectItem>
-                <SelectItem value="gmt">Greenwich Mean Time (GMT)</SelectItem>
-                {/* Add more timezone options as needed */}
-              </SelectContent>
-            </Select>
+            <Label>Profile Picture</Label>
+            <div className="mt-1 flex items-center space-x-4">
+              <div
+                {...getRootProps()}
+                className={`w-20 h-20 rounded-full border-2 border-dashed flex items-center justify-center cursor-pointer transition-colors ${
+                  isDragActive ? 'border-green-500 bg-green-50' : 'border-gray-300'
+                }`}
+              >
+                <input {...getInputProps()} />
+                {avatarUrl ? (
+                  <Avatar className="w-full h-full">
+                    <AvatarImage src={avatarUrl} alt="Profile" />
+                    <AvatarFallback>
+                      {watch('username')?.charAt(0).toUpperCase() || 'U'}
+                    </AvatarFallback>
+                  </Avatar>
+                ) : (
+                  <span className="text-gray-400">
+                    {isDragActive ? 'Drop here' : 'Upload'}
+                  </span>
+                )}
+              </div>
+              <div className="flex-grow">
+                <p className="text-sm text-gray-600 mb-2">
+                  Drag and drop an image here, or click to select a file
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById('avatar-input')?.click()}
+                >
+                  Select File
+                </Button>
+                <input
+                  id="avatar-input"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      handleAvatarUpload(e.target.files[0])
+                    }
+                  }}
+                  className="hidden"
+                />
+              </div>
+            </div>
           </div>
 
           <div>
-            <Label>Profile Picture (Optional)</Label>
-            <div className="mt-1 flex items-center justify-center w-32 h-32 border-2 border-dashed border-gray-300 rounded-full hover:border-green-200 transition-colors relative">
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleProfilePictureChange}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              />
-              {profilePictureUrl ? (
-                <img src={profilePictureUrl} alt="Profile" className="w-full h-full rounded-full object-cover" />
-              ) : (
-                <Button variant="ghost" className="w-full h-full rounded-full">
-                  <Upload className="w-6 h-6 text-gray-400" />
-                </Button>
+            <Label htmlFor="bio">Bio</Label>
+            <Controller
+              name="bio"
+              control={control}
+              render={({ field }) => (
+                <Textarea
+                  {...field}
+                  id="bio"
+                  placeholder="Tell us a bit about yourself"
+                  className="mt-1 border-green-200"
+                />
               )}
-            </div>
+            />
           </div>
 
           <div>
@@ -225,10 +294,21 @@ export default function ProfileSetup() {
             <div className="space-y-2">
               {predefinedHabits.map((habit) => (
                 <div key={habit.name} className="flex items-center space-x-2">
-                  <Checkbox
-                    id={habit.name}
-                    checked={selectedHabits.includes(habit.name)}
-                    onCheckedChange={() => handleHabitToggle(habit.name)}
+                  <Controller
+                    name="habits"
+                    control={control}
+                    render={({ field }) => (
+                      <Checkbox
+                        id={habit.name}
+                        checked={field.value.includes(habit.name)}
+                        onCheckedChange={(checked) => {
+                          const updatedHabits = checked
+                            ? [...field.value, habit.name]
+                            : field.value.filter((h) => h !== habit.name)
+                          field.onChange(updatedHabits)
+                        }}
+                      />
+                    )}
                   />
                   <Label htmlFor={habit.name} className="flex items-center space-x-2">
                     <span className="text-2xl">{habit.icon}</span>
@@ -236,86 +316,49 @@ export default function ProfileSetup() {
                   </Label>
                 </div>
               ))}
-              {selectedHabits.filter(habit => !predefinedHabits.some(h => h.name === habit)).map((habit) => (
-                <div key={habit} className="flex items-center space-x-2">
-                  <Checkbox
-                    id={habit}
-                    checked={selectedHabits.includes(habit)}
-                    onCheckedChange={() => handleHabitToggle(habit)}
-                  />
-                  <Label htmlFor={habit} className="flex items-center space-x-2">
-                    <span>{habit}</span>
-                  </Label>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 flex space-x-2">
-              <Input
-                value={customHabit}
-                onChange={(e) => setCustomHabit(e.target.value)}
-                placeholder="Add your own habit"
-                className="flex-grow"
-              />
-              <Button onClick={handleAddCustomHabit}>Add</Button>
             </div>
           </div>
 
           <div>
-            <h2 className="text-xl font-semibold text-coral-500 mb-4">Set Your Reminders</h2>
-            <div className="flex items-center space-x-4">
-              <Input
-                type="time"
-                value={reminderTime}
-                onChange={(e) => setReminderTime(e.target.value)}
-                className="border-coral-200"
-              />
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="push-notifications"
-                  checked={pushNotifications}
-                  onCheckedChange={setPushNotifications}
-                  className="bg-gray-200"
+            <Label htmlFor="reminder_time">Daily Reminder Time</Label>
+            <Controller
+              name="reminder_time"
+              control={control}
+              render={({ field }) => (
+                <Input
+                  {...field}
+                  type="time"
+                  id="reminder_time"
+                  className="mt-1 border-green-200"
                 />
-                <Label htmlFor="push-notifications" className="flex items-center space-x-2">
-                  <Bell className="w-4 h-4 text-green-500" />
-                  <span>Push Notifications</span>
-                </Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="email-reminders"
-                  checked={emailReminders}
-                  onCheckedChange={setEmailReminders}
-                  className="bg-gray-200"
-                />
-                <Label htmlFor="email-reminders" className="flex items-center space-x-2">
-                  <Mail className="w-4 h-4 text-blue-500" />
-                  <span>Email Reminders</span>
-                </Label>
-              </div>
-            </div>
+              )}
+            />
           </div>
-        </div>
 
-        <div className="mt-8">
-          <Progress value={progress} className="h-2 mb-2" />
-          <p className="text-center text-lg font-semibold text-green-600">
-            You&apos;re almost there! Keep going.
-          </p>
-        </div>
+          <div>
+            <Label htmlFor="theme">Theme Preference</Label>
+            <Controller
+              name="theme"
+              control={control}
+              render={({ field }) => (
+                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <SelectTrigger className="w-full mt-1 border-green-200">
+                    <SelectValue placeholder="Select a theme" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="light">Light</SelectItem>
+                    <SelectItem value="dark">Dark</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </div>
 
-        <div className="mt-8 flex justify-between items-center">
-          <Button variant="link" className="text-gray-500">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
+          <Button type="submit" className="w-full bg-coral-500 hover:bg-coral-600 text-black" disabled={isLoading}>
+            {isLoading ? 'Saving...' : 'Save Profile and Preferences'}
           </Button>
-          <Button className="bg-coral-500 hover:bg-coral-600 text-black px-6 py-2" onClick={handleSubmit}>
-            Next
-            <ArrowRight className="w-4 h-4 ml-2" />
-          </Button>
-        </div>
+        </form>
       </motion.div>
-      <HabitGrid />
     </div>
   )
 }

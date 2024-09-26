@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Progress } from "@/components/ui/progress"
 import { PenSquare, Dumbbell, ArrowRight, Share2 } from 'lucide-react'
+import { withAuth } from './withAuth'
 
-export default function MotivationalFeedback() {
+function MotivationalFeedback() {
   const [reflection, setReflection] = useState('')
   const currentDate = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
   const currentTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
@@ -109,3 +110,5 @@ export default function MotivationalFeedback() {
     </div>
   )
 }
+
+export default withAuth(MotivationalFeedback)

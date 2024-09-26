@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
 import Image from "next/image";
+import { toast } from 'react-toastify';
 
 export function LoginScreenComponent() {
   const [showPassword, setShowPassword] = useState(false);
@@ -23,30 +24,52 @@ export function LoginScreenComponent() {
     e.preventDefault();
     setError(null);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (error) {
+      if (error) throw error;
+
+      if (data.user) {
+        // Check if the user has completed onboarding
+        const { data: profile, error: profileError } = await supabase
+          .from('profile')
+          .select('onboarded')
+          .eq('id', data.user.id)
+          .single();
+
+        if (profileError) throw profileError;
+
+        if (profile && profile.onboarded) {
+          router.push("/dashboard");
+        } else {
+          router.push("/onboarding");
+        }
+      }
+    } catch (error) {
       setError(error.message);
-    } else {
-      router.push("/dashboard");
+      toast.error('Failed to sign in. Please try again.');
     }
   };
 
-  const handleOAuthSignUp = async (
-    provider: "google" | "facebook" | "github"
-  ) => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
+  const handleOAuthSignIn = async (provider: "google" | "facebook" | "github") => {
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
 
-    if (error) {
+      if (error) throw error;
+
+      // Note: For OAuth, we can't immediately check onboarding status
+      // This will need to be handled in the callback route
+    } catch (error) {
       setError(error.message);
+      toast.error(`Failed to sign in with ${provider}. Please try again.`);
     }
   };
 

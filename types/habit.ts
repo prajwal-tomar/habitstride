@@ -1,6 +1,7 @@
 export interface Habit {
   id: number;
   name: string;
+  completed: boolean;
   timezone: string;
   reminder_time: string;
   push_notifications: boolean;

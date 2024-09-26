@@ -5,6 +5,9 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { CheckCircle, Sun, Moon, Coffee, Book, Droplet } from "lucide-react"
+import { supabase } from '@/lib/supabaseClient'
+import { Habit } from '@/types/habit'
+import { withAuth } from './withAuth'
 
 const habits = [
   { id: 1, name: 'Morning Meditation', icon: <Sun className="w-6 h-6" /> },
@@ -21,19 +24,16 @@ const encouragingMessages = [
   "Consistency is key!",
 ]
 
-interface Habit {
-  id: number;
-  name: string;
-  icon: React.ReactNode;
-}
-
-interface HabitCardProps {
-  habit: Habit;
-  onStatusChange: (id: number, status: string) => void;
+interface HabitWithCompletion extends Habit {
   status: string;
 }
 
-const HabitCard: React.FC<HabitCardProps> = ({ habit, onStatusChange, status }) => {
+interface HabitCardProps {
+  habit: HabitWithCompletion;
+  onStatusChange: (id: number, status: string) => void;
+}
+
+const HabitCard: React.FC<HabitCardProps> = ({ habit, onStatusChange }) => {
   const [showMessage, setShowMessage] = useState(false);
 
   const handleStatusChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -45,7 +45,7 @@ const HabitCard: React.FC<HabitCardProps> = ({ habit, onStatusChange, status }) 
 
   return (
     <motion.div
-      className={`bg-white rounded-lg shadow-md p-6 ${status === 'Completed' ? 'bg-green-100' : status === 'Partial' ? 'bg-yellow-100' : 'bg-red-100'}`}
+      className={`bg-white rounded-lg shadow-md p-6 ${habit.status === 'Completed' ? 'bg-green-100' : habit.status === 'Partial' ? 'bg-yellow-100' : 'bg-red-100'}`}
       whileHover={{ scale: 1.02 }}
       layout
     >
@@ -60,7 +60,7 @@ const HabitCard: React.FC<HabitCardProps> = ({ habit, onStatusChange, status }) 
               type="radio"
               name={`status-${habit.id}`}
               value="Completed"
-              checked={status === 'Completed'}
+              checked={habit.status === 'Completed'}
               onChange={handleStatusChange}
             />
             Completed
@@ -70,7 +70,7 @@ const HabitCard: React.FC<HabitCardProps> = ({ habit, onStatusChange, status }) 
               type="radio"
               name={`status-${habit.id}`}
               value="Partial"
-              checked={status === 'Partial'}
+              checked={habit.status === 'Partial'}
               onChange={handleStatusChange}
             />
             Partial
@@ -80,7 +80,7 @@ const HabitCard: React.FC<HabitCardProps> = ({ habit, onStatusChange, status }) 
               type="radio"
               name={`status-${habit.id}`}
               value="Missed"
-              checked={status === 'Missed'}
+              checked={habit.status === 'Missed'}
               onChange={handleStatusChange}
             />
             Missed
@@ -103,39 +103,106 @@ const HabitCard: React.FC<HabitCardProps> = ({ habit, onStatusChange, status }) 
   )
 }
 
-const ProgressDisplay = ({ completedHabits }: { completedHabits: number }) => {
-  const progress = (completedHabits / habits.length) * 100
+const ProgressDisplay = ({ completedHabits, totalHabits }: { completedHabits: number; totalHabits: number }) => {
+  const progress = (completedHabits / totalHabits) * 100
 
   return (
     <div className="mb-8">
-      <h2 className="text-2xl font-semibold text-black mb-4">Today's Progress</h2>
+      <h2 className="text-2xl font-semibold text-black mb-4">Today&apos;s Progress</h2>
       <div className="bg-white rounded-lg shadow-md p-6">
         <Progress value={progress} className="h-4 mb-2" />
         <p className="text-center text-gray-600">
-          {completedHabits} out of {habits.length} habits completed
+          {completedHabits} out of {totalHabits} habits completed
         </p>
       </div>
     </div>
   )
 }
 
-export default function HabitTrackingSystem() {
-  const [habitStatuses, setHabitStatuses] = useState<{ [key: number]: string }>({});
+function HabitTrackingSystem() {
+  const [habits, setHabits] = useState<HabitWithCompletion[]>([]);
   const [showCelebration, setShowCelebration] = useState(false);
 
-  const handleStatusChange = (habitId: number, status: string) => {
-    setHabitStatuses(prevStatuses => ({ ...prevStatuses, [habitId]: status }));
+  useEffect(() => {
+    fetchHabitsWithCompletions();
+  }, []);
+
+  async function fetchHabitsWithCompletions() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const today = new Date().toISOString().split('T')[0];
+
+    const { data: habitsData, error: habitsError } = await supabase
+      .from('habits')
+      .select('*')
+      .eq('user_id', user.id);
+
+    if (habitsError) {
+      console.error('Error fetching habits:', habitsError);
+      return;
+    }
+
+    const { data: completionsData, error: completionsError } = await supabase
+      .from('habit_completions')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('date', today);
+
+    if (completionsError) {
+      console.error('Error fetching completions:', completionsError);
+      return;
+    }
+
+    const habitsWithCompletions = habitsData.map((habit: Habit) => {
+      const completion = completionsData.find((c: any) => c.habit_id === habit.id);
+      return {
+        ...habit,
+        status: completion ? completion.status : 'Missed'
+      };
+    });
+
+    setHabits(habitsWithCompletions);
+  }
+
+  const handleStatusChange = async (habitId: number, status: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const today = new Date().toISOString().split('T')[0];
+
+    const { data, error } = await supabase
+      .from('habit_completions')
+      .upsert({
+        habit_id: habitId,
+        user_id: user.id,
+        date: today,
+        status: status
+      }, {
+        onConflict: 'habit_id,user_id,date'
+      });
+
+    if (error) {
+      console.error('Error updating habit completion:', error);
+      return;
+    }
+
+    setHabits(prevHabits => 
+      prevHabits.map(habit => 
+        habit.id === habitId ? { ...habit, status } : habit
+      )
+    );
   }
 
   const handleSubmit = () => {
-    const completedHabits = Object.values(habitStatuses).filter(status => status === 'Completed').length;
+    const completedHabits = habits.filter(habit => habit.status === 'Completed').length;
     if (completedHabits === habits.length) {
       setShowCelebration(true);
       setTimeout(() => setShowCelebration(false), 3000);
     }
   }
 
-  const completedHabits = Object.values(habitStatuses).filter(status => status === 'Completed').length;
+  const completedHabits = habits.filter(habit => habit.status === 'Completed').length;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#FFA07A] to-[#FFE4B5] text-gray-800 py-12 px-4">
@@ -154,7 +221,7 @@ export default function HabitTrackingSystem() {
           </p>
         </motion.header>
 
-        <ProgressDisplay completedHabits={completedHabits} />
+        <ProgressDisplay completedHabits={completedHabits} totalHabits={habits.length} />
 
         <div className="space-y-4">
           {habits.map(habit => (
@@ -162,7 +229,6 @@ export default function HabitTrackingSystem() {
               key={habit.id}
               habit={habit}
               onStatusChange={handleStatusChange}
-              status={habitStatuses[habit.id] || 'Missed'}
             />
           ))}
         </div>
@@ -197,3 +263,5 @@ export default function HabitTrackingSystem() {
     </div>
   )
 }
+
+export default withAuth(HabitTrackingSystem)
